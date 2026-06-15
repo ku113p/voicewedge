@@ -1,13 +1,11 @@
-//! voicewedge — Phase 2.
+//! voicewedge — Phase 2 (+feedback, settings menu, inject template).
 //!
 //! Tray app: hotkey starts recording; Enter finishes (transcribe + inject), Escape
-//! cancels. The stop keys are swallowed by a global keyboard hook so they don't leak
-//! into the focused window. On finish, the transcript (plus the active profile's
-//! append string) is pasted into whatever field has focus.
-//!
-//! Flow: hotkey -> record (icon red, toast) -> Enter -> WAV -> transcribe (worker)
-//!       -> paste "<text>  <append>" + Enter -> restore clipboard -> toast.
-//!       Escape -> discard, no file, no request.
+//! cancels. Stop keys are swallowed by a global keyboard hook so they don't leak
+//! into the focused window. The injected line is built from the active profile's
+//! `template` ({text} / {filename} placeholders).
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
 mod config;
@@ -17,6 +15,7 @@ mod notify;
 mod stt;
 
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -28,7 +27,7 @@ use global_hotkey::{
 };
 use tao::event_loop::{ControlFlow, EventLoop};
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     Icon, TrayIconBuilder,
 };
 use tracing::{error, info, warn};
@@ -50,12 +49,36 @@ fn timestamp_name() -> String {
     format!("rec-{millis}.wav")
 }
 
+fn open_in_editor(path: &std::path::Path) {
+    #[cfg(windows)]
+    let r = Command::new("notepad").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let r = Command::new("open").args(["-t".as_ref(), path.as_os_str()]).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = Command::new("xdg-open").arg(path).spawn();
+    if let Err(e) = r {
+        error!("could not open editor for {}: {e}", path.display());
+    }
+}
+
+fn open_folder(path: &std::path::Path) {
+    #[cfg(windows)]
+    let r = Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let r = Command::new("open").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = Command::new("xdg-open").arg(path).spawn();
+    if let Err(e) = r {
+        error!("could not open folder {}: {e}", path.display());
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    info!("voicewedge starting (Phase 2)");
+    info!("voicewedge starting");
 
     let cfg = config::load();
     let api_key = cfg.resolve_api_key();
@@ -66,14 +89,15 @@ fn main() {
     }
     let active = cfg.active_profile();
     info!(
-        "active profile = '{}' (append = {:?}, enter = {})",
-        active.name, active.append, active.press_enter
+        "active profile = '{}' (template = {:?}, enter = {})",
+        active.name, active.template, active.press_enter
     );
 
     let inbox_dir = PathBuf::from(&cfg.audio.inbox_dir);
     if let Err(e) = std::fs::create_dir_all(&inbox_dir) {
         error!("could not create inbox dir {}: {e}", inbox_dir.display());
     }
+    let config_file = config::config_path();
 
     let event_loop = EventLoop::new();
 
@@ -89,14 +113,25 @@ fn main() {
     let (stop_tx, stop_rx) = mpsc::channel::<hook::StopKind>();
     hook::spawn(recording_flag.clone(), stop_tx);
 
+    // --- Worker -> UI "transcription finished" signal (so we reset the tray icon) ---
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+
     // --- Tray icon + menu ---
     let menu = Menu::new();
+    let settings_item = MenuItem::new("Settings (edit config)", true, None);
+    let recordings_item = MenuItem::new("Open recordings folder", true, None);
     let quit_item = MenuItem::new("Quit voicewedge", true, None);
-    menu.append(&quit_item).expect("append Quit item");
+    let _ = menu.append(&settings_item);
+    let _ = menu.append(&recordings_item);
+    let _ = menu.append(&PredefinedMenuItem::separator());
+    let _ = menu.append(&quit_item);
+    let settings_id = settings_item.id().clone();
+    let recordings_id = recordings_item.id().clone();
     let quit_id = quit_item.id().clone();
 
     let icon_idle = make_icon([0x2e, 0x7d, 0xff]); // blue
     let icon_rec = make_icon([0xff, 0x3b, 0x30]); // red
+    let icon_busy = make_icon([0xff, 0xa5, 0x00]); // orange
 
     let tray = TrayIconBuilder::new()
         .with_tooltip("voicewedge — ready")
@@ -121,7 +156,7 @@ fn main() {
                 continue;
             }
             if recorder.is_some() {
-                continue; // already recording; Enter/Esc end it
+                continue;
             }
             match audio::Recorder::start() {
                 Ok(rec) => {
@@ -143,11 +178,11 @@ fn main() {
         while let Ok(kind) = stop_rx.try_recv() {
             recording_flag.store(false, Ordering::SeqCst);
             let Some(rec) = recorder.take() else { continue };
-            let _ = tray.set_icon(Some(icon_idle.clone()));
 
             match kind {
                 hook::StopKind::Cancel => {
                     drop(rec);
+                    let _ = tray.set_icon(Some(icon_idle.clone()));
                     let _ = tray.set_tooltip(Some("voicewedge — ready"));
                     info!("recording cancelled");
                     notify::toast("voicewedge", "Cancelled");
@@ -156,17 +191,21 @@ fn main() {
                     let (samples, sample_rate) = rec.stop();
                     let secs = samples.len() as f32 / sample_rate.max(1) as f32;
                     info!("recording stopped: {:.1}s, {} samples", secs, samples.len());
-                    let _ = tray.set_tooltip(Some("voicewedge — transcribing…"));
+                    let _ = tray.set_icon(Some(icon_busy.clone()));
+                    let _ = tray.set_tooltip(Some("voicewedge — transcribing… (please wait)"));
+                    notify::toast("voicewedge", "Transcribing… (do not click away)");
 
                     let path = inbox_dir.join(timestamp_name());
                     if let Err(e) = audio::write_wav(&path, &samples, sample_rate) {
                         error!("WAV write failed: {e}");
                         notify::toast("voicewedge", "WAV write failed");
+                        let _ = tray.set_icon(Some(icon_idle.clone()));
                         continue;
                     }
 
                     let Some(key) = api_key.clone() else {
                         warn!("no API key — saved {} but skipping transcription", path.display());
+                        let _ = tray.set_icon(Some(icon_idle.clone()));
                         continue;
                     };
                     let model = cfg.stt.model.clone();
@@ -176,6 +215,7 @@ fn main() {
                     let profile = active.clone();
                     let method = cfg.inject.method.clone();
                     let restore = cfg.inject.restore_clipboard;
+                    let done = done_tx.clone();
 
                     std::thread::spawn(move || {
                         match stt::transcribe(&path, &key, &model, &language, &endpoint, timeout) {
@@ -185,12 +225,12 @@ fn main() {
                                     .file_name()
                                     .map(|f| f.to_string_lossy().to_string())
                                     .unwrap_or_default();
-                                let line = if profile.append.is_empty() {
-                                    text.clone()
+                                let tmpl = if profile.template.is_empty() {
+                                    "{text}".to_string()
                                 } else {
-                                    let appended = profile.append.replace("{filename}", &filename);
-                                    format!("{text}  {appended}")
+                                    profile.template.clone()
                                 };
+                                let line = tmpl.replace("{text}", &text).replace("{filename}", &filename);
                                 match inject::inject(&line, profile.press_enter, &method, restore) {
                                     Ok(()) => notify::toast("voicewedge", "Transcribed & inserted"),
                                     Err(e) => {
@@ -204,15 +244,27 @@ fn main() {
                                 notify::toast("voicewedge", "Transcription failed");
                             }
                         }
+                        let _ = done.send(());
                     });
                 }
             }
         }
 
+        // Transcription finished -> reset the tray icon to idle.
+        while done_rx.try_recv().is_ok() {
+            let _ = tray.set_icon(Some(icon_idle.clone()));
+            let _ = tray.set_tooltip(Some("voicewedge — ready"));
+        }
+
+        // Menu actions.
         while let Ok(ev) = menu_rx.try_recv() {
             if ev.id == quit_id {
                 info!("quit selected — exiting");
                 *control_flow = ControlFlow::Exit;
+            } else if ev.id == settings_id {
+                open_in_editor(&config_file);
+            } else if ev.id == recordings_id {
+                open_folder(&inbox_dir);
             }
         }
     });

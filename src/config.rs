@@ -22,7 +22,9 @@ pub struct Config {
 #[serde(default)]
 pub struct Profile {
     pub name: String,
-    pub append: String,
+    /// Inject template with placeholders {text} and {filename}.
+    /// e.g. "{text}  /bio:voice {filename}" or just "{text}".
+    pub template: String,
     pub press_enter: bool,
 }
 
@@ -69,8 +71,12 @@ impl Default for Config {
             mode: "enter_to_stop".into(),
             active_profile: "biograph".into(),
             profiles: vec![
-                Profile { name: "biograph".into(), append: "/bio:voice {filename}".into(), press_enter: true },
-                Profile { name: "plain".into(), append: String::new(), press_enter: false },
+                Profile {
+                    name: "biograph".into(),
+                    template: "{text}  /bio:voice {filename}".into(),
+                    press_enter: true,
+                },
+                Profile { name: "plain".into(), template: "{text}".into(), press_enter: false },
             ],
             stt: Stt::default(),
             inject: Inject::default(),
@@ -82,7 +88,7 @@ impl Default for Config {
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { name: String::new(), append: String::new(), press_enter: false }
+        Self { name: String::new(), template: "{text}".into(), press_enter: false }
     }
 }
 

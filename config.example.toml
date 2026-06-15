@@ -4,18 +4,19 @@
 hotkey = "CmdOrCtrl+Shift+Space"   # ONE hotkey to START recording
 mode   = "enter_to_stop"            # STOP on Enter, CANCEL on Escape (both swallowed)
 
-# Profiles = the "two modes". One hotkey records; the ACTIVE profile decides what to append.
-# Switch active_profile here or from the tray menu — no second hotkey.
+# Profiles = the "two modes". One hotkey records; the ACTIVE profile decides the
+# inject template. Switch active_profile here or from the tray menu — no second hotkey.
 active_profile = "biograph"
 
 [[profiles]]
 name        = "biograph"
-append      = "/bio:voice {filename}"   # free text; {filename} substituted; can differ per profile
+# Inject template: {text} = transcript, {filename} = the WAV file name. Position them freely.
+template    = "{text}  /bio:voice {filename}"
 press_enter = true
 
 [[profiles]]
 name        = "plain"
-append      = ""                          # plain dictation: just type the text, nothing appended
+template    = "{text}"   # plain dictation: just the text
 press_enter = false
 
 [stt]
