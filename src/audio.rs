@@ -63,19 +63,40 @@ impl Recorder {
         Ok(Self { stream, buf, channels, sample_rate })
     }
 
-    /// Stop capture, downmix to mono, return (samples, sample_rate).
+    /// Stop capture, downmix to mono, downsample to 16 kHz, return (samples, rate).
+    /// 16 kHz is Whisper/gpt-4o's native rate and keeps the upload small — a 48 kHz
+    /// 3-min recording is ~22 MB base64 and OpenRouter 502s on it.
     pub fn stop(self) -> (Vec<f32>, u32) {
         drop(self.stream);
         let raw = self.buf.lock().unwrap().clone();
-        let mono = if self.channels > 1 {
+        let mono: Vec<f32> = if self.channels > 1 {
             raw.chunks(self.channels as usize)
                 .map(|c| c.iter().sum::<f32>() / c.len() as f32)
                 .collect()
         } else {
             raw
         };
-        (mono, self.sample_rate)
+        downsample(mono, self.sample_rate, 16_000)
     }
+}
+
+/// Window-averaging downsampler (anti-aliased). No-op if already <= target.
+fn downsample(input: Vec<f32>, from: u32, to: u32) -> (Vec<f32>, u32) {
+    if from <= to || input.is_empty() {
+        return (input, from);
+    }
+    let ratio = from as f64 / to as f64;
+    let out_len = (input.len() as f64 / ratio).floor() as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for j in 0..out_len {
+        let start = (j as f64 * ratio) as usize;
+        let end = (((j + 1) as f64 * ratio) as usize).min(input.len());
+        if start >= end {
+            break;
+        }
+        out.push(input[start..end].iter().sum::<f32>() / (end - start) as f32);
+    }
+    (out, to)
 }
 
 /// Write mono f32 samples as a 16-bit PCM WAV.
