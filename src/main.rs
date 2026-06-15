@@ -312,6 +312,18 @@ fn main() {
                         match stt::transcribe(&path, &key, &model, &language, &endpoint, timeout) {
                             Ok(text) => {
                                 info!("TRANSCRIPT: {text}");
+                                // Sidecar JSON next to the WAV holds the authoritative
+                                // transcript, so the archiving side reads it from disk
+                                // instead of the model re-passing a long string.
+                                let sidecar = path.with_extension("json");
+                                let meta = serde_json::json!({
+                                    "transcript": text,
+                                    "model": model,
+                                    "language": language,
+                                });
+                                if let Err(e) = std::fs::write(&sidecar, meta.to_string()) {
+                                    error!("sidecar write failed: {e}");
+                                }
                                 let filename = path
                                     .file_name()
                                     .map(|f| f.to_string_lossy().to_string())
