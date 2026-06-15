@@ -97,7 +97,9 @@ impl Default for Stt {
         Self {
             provider: "openrouter".into(),
             model: "openai/gpt-4o-transcribe".into(),
-            language: "ru".into(),
+            // "layout" = follow active keyboard layout; "auto" = let the model detect;
+            // or an explicit code like "ru" / "en".
+            language: "layout".into(),
             api_key_env: "OPENROUTER_API_KEY".into(),
             api_key: String::new(),
             endpoint: "https://openrouter.ai/api/v1/audio/transcriptions".into(),
@@ -140,6 +142,40 @@ impl Config {
             .cloned()
             .unwrap_or_default()
     }
+}
+
+/// Resolve which language code to send to the STT endpoint.
+///   "auto"   -> "" (let the model auto-detect)
+///   "layout" -> the active keyboard layout's language (ru/en/...), else "" (auto)
+///   other    -> used verbatim (e.g. "ru", "en")
+pub fn resolve_language(lang: &str) -> String {
+    match lang {
+        "auto" => String::new(),
+        "layout" => active_layout_lang().unwrap_or_default(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(windows)]
+fn active_layout_lang() -> Option<String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        let tid = GetWindowThreadProcessId(hwnd, None);
+        let hkl = GetKeyboardLayout(tid);
+        let langid = (hkl.0 as usize as u32) & 0xFFFF;
+        match langid & 0x3FF {
+            0x09 => Some("en".to_string()),
+            0x19 => Some("ru".to_string()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn active_layout_lang() -> Option<String> {
+    None
 }
 
 /// Resolve the config file path (cross-platform):

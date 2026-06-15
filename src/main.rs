@@ -1,9 +1,9 @@
-//! voicewedge — Phase 2 (+feedback, settings menu, inject template).
+//! voicewedge — Phase 2 (+feedback, settings menu, inject template, mic icon, sounds, language modes).
 //!
 //! Tray app: hotkey starts recording; Enter finishes (transcribe + inject), Escape
-//! cancels. Stop keys are swallowed by a global keyboard hook so they don't leak
-//! into the focused window. The injected line is built from the active profile's
-//! `template` ({text} / {filename} placeholders).
+//! cancels. Stop keys are swallowed by a global keyboard hook. The injected line is
+//! built from the active profile's `template`. Language follows config (fixed / "auto"
+//! / "layout" = active keyboard layout). Audio cues + a mic tray icon give feedback.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -12,6 +12,7 @@ mod config;
 mod hook;
 mod inject;
 mod notify;
+mod sound;
 mod stt;
 
 use std::path::PathBuf;
@@ -32,13 +33,49 @@ use tray_icon::{
 };
 use tracing::{error, info, warn};
 
-fn make_icon(rgb: [u8; 3]) -> Icon {
-    let size: u32 = 32;
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    for _ in 0..(size * size) {
-        rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xff]);
+/// A simple anti-aliased microphone icon drawn in code (64x64 RGBA). `dot` adds a
+/// state indicator in the bottom-right (e.g. red = recording, orange = transcribing).
+fn make_mic_icon(dot: Option<[u8; 3]>) -> Icon {
+    let size: u32 = 64;
+    let s = size as f32;
+    let mic = [0x4d, 0x9b, 0xff]; // light blue
+
+    let seg = |px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32| -> f32 {
+        let (abx, aby) = (bx - ax, by - ay);
+        let t = (((px - ax) * abx + (py - ay) * aby) / (abx * abx + aby * aby)).clamp(0.0, 1.0);
+        let (cx, cy) = (ax + t * abx, ay + t * aby);
+        let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+        (r - d + 0.5).clamp(0.0, 1.0)
+    };
+    let circ = |px: f32, py: f32, cx: f32, cy: f32, r: f32| -> f32 {
+        let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+        (r - d + 0.5).clamp(0.0, 1.0)
+    };
+
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let body = seg(px, py, 0.5 * s, 0.25 * s, 0.5 * s, 0.47 * s, 0.16 * s);
+            let stem = seg(px, py, 0.5 * s, 0.66 * s, 0.5 * s, 0.80 * s, 0.045 * s);
+            let base = seg(px, py, 0.34 * s, 0.82 * s, 0.66 * s, 0.82 * s, 0.045 * s);
+            let mut col = mic;
+            let mut a = body.max(stem).max(base);
+            if let Some(dc) = dot {
+                let dcov = circ(px, py, 0.76 * s, 0.76 * s, 0.20 * s);
+                if dcov > 0.0 {
+                    col = dc;
+                    a = a.max(dcov);
+                }
+            }
+            let i = ((y * size + x) * 4) as usize;
+            rgba[i] = col[0];
+            rgba[i + 1] = col[1];
+            rgba[i + 2] = col[2];
+            rgba[i + 3] = (a.clamp(0.0, 1.0) * 255.0) as u8;
+        }
     }
-    Icon::from_rgba(rgba, size, size).expect("valid icon dimensions")
+    Icon::from_rgba(rgba, size, size).expect("valid icon")
 }
 
 fn timestamp_name() -> String {
@@ -85,13 +122,10 @@ fn main() {
     if api_key.is_none() {
         warn!("no OpenRouter API key — set it in config.toml; transcription disabled");
     } else {
-        info!("STT model = {}, lang = {}", cfg.stt.model, cfg.stt.language);
+        info!("STT model = {}, language mode = {}", cfg.stt.model, cfg.stt.language);
     }
     let active = cfg.active_profile();
-    info!(
-        "active profile = '{}' (template = {:?}, enter = {})",
-        active.name, active.template, active.press_enter
-    );
+    let sound_on = cfg.feedback.sound;
 
     let inbox_dir = PathBuf::from(&cfg.audio.inbox_dir);
     if let Err(e) = std::fs::create_dir_all(&inbox_dir) {
@@ -113,7 +147,7 @@ fn main() {
     let (stop_tx, stop_rx) = mpsc::channel::<hook::StopKind>();
     hook::spawn(recording_flag.clone(), stop_tx);
 
-    // --- Worker -> UI "transcription finished" signal (so we reset the tray icon) ---
+    // --- Worker -> UI "transcription finished" signal (resets the tray icon) ---
     let (done_tx, done_rx) = mpsc::channel::<()>();
 
     // --- Tray icon + menu ---
@@ -129,9 +163,9 @@ fn main() {
     let recordings_id = recordings_item.id().clone();
     let quit_id = quit_item.id().clone();
 
-    let icon_idle = make_icon([0x2e, 0x7d, 0xff]); // blue
-    let icon_rec = make_icon([0xff, 0x3b, 0x30]); // red
-    let icon_busy = make_icon([0xff, 0xa5, 0x00]); // orange
+    let icon_idle = make_mic_icon(None);
+    let icon_rec = make_mic_icon(Some([0xff, 0x3b, 0x30])); // red dot
+    let icon_busy = make_mic_icon(Some([0xff, 0xa5, 0x00])); // orange dot
 
     let tray = TrayIconBuilder::new()
         .with_tooltip("voicewedge — ready")
@@ -165,11 +199,17 @@ fn main() {
                     let _ = tray.set_icon(Some(icon_rec.clone()));
                     let _ = tray.set_tooltip(Some("voicewedge — recording… (Enter=finish, Esc=cancel)"));
                     notify::toast("voicewedge", "Recording… Enter to finish, Esc to cancel");
+                    if sound_on {
+                        sound::start();
+                    }
                     info!("recording started");
                 }
                 Err(e) => {
                     error!("could not start recording: {e}");
                     notify::toast("voicewedge", &format!("Mic error: {e}"));
+                    if sound_on {
+                        sound::alert();
+                    }
                 }
             }
         }
@@ -194,6 +234,9 @@ fn main() {
                     let _ = tray.set_icon(Some(icon_busy.clone()));
                     let _ = tray.set_tooltip(Some("voicewedge — transcribing… (please wait)"));
                     notify::toast("voicewedge", "Transcribing… (do not click away)");
+                    if sound_on {
+                        sound::finish();
+                    }
 
                     let path = inbox_dir.join(timestamp_name());
                     if let Err(e) = audio::write_wav(&path, &samples, sample_rate) {
@@ -209,7 +252,7 @@ fn main() {
                         continue;
                     };
                     let model = cfg.stt.model.clone();
-                    let language = cfg.stt.language.clone();
+                    let language = config::resolve_language(&cfg.stt.language);
                     let endpoint = cfg.stt.endpoint.clone();
                     let timeout = cfg.stt.timeout_secs;
                     let profile = active.clone();
@@ -236,12 +279,18 @@ fn main() {
                                     Err(e) => {
                                         error!("injection failed: {e}");
                                         notify::toast("voicewedge", "Transcribed (insert failed)");
+                                        if sound_on {
+                                            sound::alert();
+                                        }
                                     }
                                 }
                             }
                             Err(e) => {
                                 error!("transcription failed: {e}");
                                 notify::toast("voicewedge", "Transcription failed");
+                                if sound_on {
+                                    sound::alert();
+                                }
                             }
                         }
                         let _ = done.send(());
