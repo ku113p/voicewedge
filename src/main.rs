@@ -74,6 +74,74 @@ fn make_mic_icon(dot: Option<[u8; 3]>) -> Icon {
     Icon::from_rgba(rgba, size, size).expect("valid icon")
 }
 
+/// Recording icon: a big badge with a 7-segment digit (minutes left). Blinks
+/// red<->yellow in the last 30 s. No overlay window — the countdown lives in the tray.
+fn recording_icon(minutes_left: u8, blink: bool) -> Icon {
+    let size: u32 = 64;
+    let s = size as f32;
+    let badge = if blink { [0xff, 0xd0, 0x20] } else { [0xff, 0x3b, 0x30] };
+
+    let seg = |px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32| -> f32 {
+        let (abx, aby) = (bx - ax, by - ay);
+        let t = (((px - ax) * abx + (py - ay) * aby) / (abx * abx + aby * aby)).clamp(0.0, 1.0);
+        let (cx, cy) = (ax + t * abx, ay + t * aby);
+        let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+        (r - d + 0.5).clamp(0.0, 1.0)
+    };
+    let circ = |px: f32, py: f32, cx: f32, cy: f32, r: f32| -> f32 {
+        let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+        (r - d + 0.5).clamp(0.0, 1.0)
+    };
+
+    let (dcx, dcy) = (0.5 * s, 0.5 * s);
+    let (hw, hh, sr) = (0.16 * s, 0.25 * s, 0.05 * s);
+    // 7-segment masks [a,b,c,d,e,f,g]
+    let segs: [bool; 7] = match minutes_left {
+        0 => [true, true, true, true, true, true, false],
+        1 => [false, true, true, false, false, false, false],
+        2 => [true, true, false, true, true, false, true],
+        3 => [true, true, true, true, false, false, true],
+        4 => [false, true, true, false, false, true, true],
+        5 => [true, false, true, true, false, true, true],
+        6 => [true, false, true, true, true, true, true],
+        7 => [true, true, true, false, false, false, false],
+        8 => [true, true, true, true, true, true, true],
+        _ => [true, true, true, true, false, true, true],
+    };
+    let digit = |px: f32, py: f32| -> f32 {
+        let (l, rt, tp, bt, md) = (dcx - hw, dcx + hw, dcy - hh, dcy + hh, dcy);
+        let mut c = 0.0f32;
+        if segs[0] { c = c.max(seg(px, py, l, tp, rt, tp, sr)); }
+        if segs[1] { c = c.max(seg(px, py, rt, tp, rt, md, sr)); }
+        if segs[2] { c = c.max(seg(px, py, rt, md, rt, bt, sr)); }
+        if segs[3] { c = c.max(seg(px, py, l, bt, rt, bt, sr)); }
+        if segs[4] { c = c.max(seg(px, py, l, md, l, bt, sr)); }
+        if segs[5] { c = c.max(seg(px, py, l, tp, l, md, sr)); }
+        if segs[6] { c = c.max(seg(px, py, l, md, rt, md, sr)); }
+        c
+    };
+
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut col = badge;
+            let mut a = circ(px, py, dcx, dcy, 0.46 * s);
+            let dg = digit(px, py);
+            if dg > 0.0 {
+                col = [0xff, 0xff, 0xff];
+                a = a.max(dg);
+            }
+            let i = ((y * size + x) * 4) as usize;
+            rgba[i] = col[0];
+            rgba[i + 1] = col[1];
+            rgba[i + 2] = col[2];
+            rgba[i + 3] = (a.clamp(0.0, 1.0) * 255.0) as u8;
+        }
+    }
+    Icon::from_rgba(rgba, size, size).expect("valid icon")
+}
+
 fn timestamp_name() -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -208,16 +276,27 @@ fn main() {
 
     let mut recorder: Option<audio::Recorder> = None;
     let mut record_start: Option<Instant> = None;
+    let mut last_icon_key: Option<(u8, bool)> = None;
 
     event_loop.run(move |_event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
 
-        // Enforce the max recording length (auto-finish).
-        if let Some(t) = record_start {
-            if max_secs > 0 && t.elapsed().as_secs() >= max_secs {
+        // Countdown in the tray icon + auto-finish at the limit.
+        if let (Some(t), true) = (record_start, max_secs > 0) {
+            let elapsed = t.elapsed();
+            if elapsed.as_secs() >= max_secs {
                 info!("max recording length {max_secs}s reached — auto-finishing");
                 record_start = None;
                 let _ = stop_tx_timeout.send(hook::StopKind::Finish);
+            } else {
+                let remaining = max_secs - elapsed.as_secs();
+                let mins = (remaining.div_ceil(60)).clamp(1, 9) as u8;
+                let blink = remaining <= 30 && (elapsed.as_millis() / 500) % 2 == 0;
+                let key = (mins, blink);
+                if Some(key) != last_icon_key {
+                    last_icon_key = Some(key);
+                    let _ = tray.set_icon(Some(recording_icon(mins, blink)));
+                }
             }
         }
 
@@ -243,6 +322,7 @@ fn main() {
                 Ok(rec) => {
                     recorder = Some(rec);
                     record_start = Some(Instant::now());
+                    last_icon_key = None;
                     recording_flag.store(true, Ordering::SeqCst);
                     let _ = tray.set_icon(Some(icon_rec.clone()));
                     let _ = tray.set_tooltip(Some("voicewedge — recording… (Enter=finish, Esc=cancel)"));
@@ -265,6 +345,7 @@ fn main() {
         while let Ok(kind) = stop_rx.try_recv() {
             recording_flag.store(false, Ordering::SeqCst);
             record_start = None;
+            last_icon_key = None;
             let Some(rec) = recorder.take() else { continue };
 
             match kind {
