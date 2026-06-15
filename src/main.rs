@@ -17,6 +17,7 @@ mod stt;
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -110,12 +111,39 @@ fn open_folder(path: &std::path::Path) {
     }
 }
 
+/// True if another voicewedge instance already holds the single-instance mutex.
+#[cfg(windows)]
+fn another_instance_running() -> bool {
+    use windows::core::w;
+    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows::Win32::System::Threading::CreateMutexW;
+    unsafe {
+        let handle = CreateMutexW(None, true, w!("voicewedge_single_instance")).ok();
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            return true;
+        }
+        // Keep the mutex alive for the whole process lifetime.
+        std::mem::forget(handle);
+        false
+    }
+}
+
+#[cfg(not(windows))]
+fn another_instance_running() -> bool {
+    false
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
     info!("voicewedge starting");
+
+    if another_instance_running() {
+        info!("another voicewedge instance is already running — exiting");
+        return;
+    }
 
     let cfg = config::load();
     let api_key = cfg.resolve_api_key();
@@ -137,15 +165,22 @@ fn main() {
 
     // --- Global hotkey: Ctrl+Shift+Space (start only) ---
     let hotkey_manager = GlobalHotKeyManager::new().expect("create hotkey manager");
-    let hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+    let hotkey = HotKey::from_str(&cfg.hotkey).unwrap_or_else(|_| {
+        warn!("could not parse hotkey '{}'; using Win+Alt+Space", cfg.hotkey);
+        HotKey::new(Some(Modifiers::META | Modifiers::ALT), Code::Space)
+    });
     let hotkey_id = hotkey.id();
-    hotkey_manager.register(hotkey).expect("register Ctrl+Shift+Space");
-    info!("hotkey Ctrl+Shift+Space ready — press to record, Enter to finish, Esc to cancel");
+    if let Err(e) = hotkey_manager.register(hotkey) {
+        error!("failed to register hotkey '{}': {e}", cfg.hotkey);
+    }
+    info!("hotkey '{}' ready — press to record, Enter to finish, Esc to cancel", cfg.hotkey);
 
     // --- Keyboard hook for Enter (finish) / Escape (cancel) ---
     let recording_flag = Arc::new(AtomicBool::new(false));
     let (stop_tx, stop_rx) = mpsc::channel::<hook::StopKind>();
+    let stop_tx_timeout = stop_tx.clone();
     hook::spawn(recording_flag.clone(), stop_tx);
+    let max_secs = cfg.audio.max_seconds;
 
     // --- Worker -> UI "transcription finished" signal (resets the tray icon) ---
     let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -180,9 +215,19 @@ fn main() {
     info!("ready");
 
     let mut recorder: Option<audio::Recorder> = None;
+    let mut record_start: Option<Instant> = None;
 
     event_loop.run(move |_event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
+
+        // Enforce the max recording length (auto-finish).
+        if let Some(t) = record_start {
+            if max_secs > 0 && t.elapsed().as_secs() >= max_secs {
+                info!("max recording length {max_secs}s reached — auto-finishing");
+                record_start = None;
+                let _ = stop_tx_timeout.send(hook::StopKind::Finish);
+            }
+        }
 
         // Start on hotkey.
         while let Ok(ev) = hotkey_rx.try_recv() {
@@ -195,6 +240,7 @@ fn main() {
             match audio::Recorder::start() {
                 Ok(rec) => {
                     recorder = Some(rec);
+                    record_start = Some(Instant::now());
                     recording_flag.store(true, Ordering::SeqCst);
                     let _ = tray.set_icon(Some(icon_rec.clone()));
                     let _ = tray.set_tooltip(Some("voicewedge — recording… (Enter=finish, Esc=cancel)"));
@@ -217,6 +263,7 @@ fn main() {
         // Finish / cancel from the keyboard hook.
         while let Ok(kind) = stop_rx.try_recv() {
             recording_flag.store(false, Ordering::SeqCst);
+            record_start = None;
             let Some(rec) = recorder.take() else { continue };
 
             match kind {

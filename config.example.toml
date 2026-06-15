@@ -1,7 +1,7 @@
 # Copy to config.toml (gitignored) and fill in your key.
 # config.toml is read from %APPDATA%\voicewedge\config.toml on Windows.
 
-hotkey = "CmdOrCtrl+Shift+Space"   # ONE hotkey to START recording
+hotkey = "Super+Alt+Space"         # ONE hotkey to START recording (Super = Windows key; change if it clashes)
 mode   = "enter_to_stop"            # STOP on Enter, CANCEL on Escape (both swallowed)
 
 # Profiles = the "two modes". One hotkey records; the ACTIVE profile decides the
@@ -36,7 +36,7 @@ restore_clipboard = true
 inbox_dir   = 'CHANGE_ME\biograph\files\audio_inbox'
 sample_rate = 16000
 format      = "wav"
-max_seconds = 300
+max_seconds = 180   # auto-stop after this many seconds
 
 [feedback]
 overlay = true   # on-screen "recording…" indicator (Win+H style)

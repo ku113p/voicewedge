@@ -67,7 +67,7 @@ pub struct Feedback {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            hotkey: "CmdOrCtrl+Shift+Space".into(),
+            hotkey: "Super+Alt+Space".into(),
             mode: "enter_to_stop".into(),
             active_profile: "biograph".into(),
             profiles: vec![
@@ -116,7 +116,7 @@ impl Default for Inject {
 
 impl Default for Audio {
     fn default() -> Self {
-        Self { inbox_dir: "recordings".into(), sample_rate: 16000, format: "wav".into(), max_seconds: 300 }
+        Self { inbox_dir: "recordings".into(), sample_rate: 16000, format: "wav".into(), max_seconds: 180 }
     }
 }
 
