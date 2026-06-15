@@ -1,0 +1,27 @@
+# Rust build artifacts
+/target/
+
+# Local config holds the API key — never commit
+config.toml
+
+# Captured audio + sidecars + logs — never commit
+*.wav
+*.opus
+*.json
+!config.example.toml
+*.log
+
+# Secrets
+*.env
+.env
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+
+
+# Added by cargo
+
+/target

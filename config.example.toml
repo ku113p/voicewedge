@@ -1,0 +1,43 @@
+# Copy to config.toml (gitignored) and fill in your key.
+# config.toml is read from %APPDATA%\voicewedge\config.toml on Windows.
+
+hotkey = "CmdOrCtrl+Shift+Space"   # ONE hotkey to START recording
+mode   = "enter_to_stop"            # STOP on Enter, CANCEL on Escape (both swallowed)
+
+# Profiles = the "two modes". One hotkey records; the ACTIVE profile decides what to append.
+# Switch active_profile here or from the tray menu — no second hotkey.
+active_profile = "biograph"
+
+[[profiles]]
+name        = "biograph"
+append      = "/bio:voice {filename}"   # free text; {filename} substituted; can differ per profile
+press_enter = true
+
+[[profiles]]
+name        = "plain"
+append      = ""                          # plain dictation: just type the text, nothing appended
+press_enter = false
+
+[stt]
+provider     = "openrouter"
+model        = "openai/whisper-large-v3"   # alt: qwen/qwen3-asr-flash-2026-02-10, google/chirp-3
+language     = "ru"                          # "" = auto-detect
+api_key_env  = "OPENROUTER_API_KEY"         # read key from this env var...
+api_key      = ""                            # ...or paste here (this file is your gitignored config.toml)
+endpoint     = "https://openrouter.ai/api/v1/audio/transcriptions"
+timeout_secs = 60
+
+[inject]
+method            = "paste"   # "paste" (recommended) | "type"
+restore_clipboard = true
+
+[audio]
+inbox_dir   = 'CHANGE_ME\biograph\files\audio_inbox'
+sample_rate = 16000
+format      = "wav"
+max_seconds = 300
+
+[feedback]
+overlay = true   # on-screen "recording…" indicator (Win+H style)
+toast   = true
+sound   = true
