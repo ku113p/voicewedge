@@ -96,7 +96,7 @@ impl Default for Stt {
     fn default() -> Self {
         Self {
             provider: "openrouter".into(),
-            model: "openai/whisper-large-v3".into(),
+            model: "openai/gpt-4o-transcribe".into(),
             language: "ru".into(),
             api_key_env: "OPENROUTER_API_KEY".into(),
             api_key: String::new(),

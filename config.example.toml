@@ -21,7 +21,7 @@ press_enter = false
 
 [stt]
 provider     = "openrouter"
-model        = "openai/whisper-large-v3"   # alt: qwen/qwen3-asr-flash-2026-02-10, google/chirp-3
+model        = "openai/gpt-4o-transcribe"  # best Russian in our A/B; alt: openai/whisper-large-v3, qwen/qwen3-asr-flash-2026-02-10
 language     = "ru"                          # "" = auto-detect
 api_key_env  = "OPENROUTER_API_KEY"         # read key from this env var...
 api_key      = ""                            # ...or paste here (this file is your gitignored config.toml)
