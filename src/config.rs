@@ -21,8 +21,7 @@ pub struct Config {
 #[serde(default)]
 pub struct Profile {
     pub name: String,
-    /// Inject template with placeholders {text} and {filename}.
-    /// e.g. "{text}  /bio:voice {filename}" or just "{text}".
+    /// Inject template. Placeholders: {text}, {path} (absolute WAV path), {filename}.
     pub template: String,
     pub press_enter: bool,
 }
@@ -74,7 +73,7 @@ impl Default for Config {
             profiles: vec![
                 Profile {
                     name: "biograph".into(),
-                    template: "{text}  /bio:voice {filename}".into(),
+                    template: "{text}  /bio:voice {path}".into(),
                     press_enter: true,
                 },
                 Profile { name: "plain".into(), template: "{text}".into(), press_enter: false },

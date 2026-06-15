@@ -17,10 +17,10 @@ active_profile = "biograph"
 
 # --- Profiles -----------------------------------------------------------------
 # One hotkey records; the ACTIVE profile's `template` builds the inserted text.
-# Placeholders: {text} = transcript, {filename} = saved audio file name.
+# Placeholders: {text} = transcript, {path} = absolute WAV path, {filename} = file name.
 [[profiles]]
 name        = "biograph"
-template    = "{text}  /bio:voice {filename}"   # transcript + a trailing command
+template    = "{text}  /bio:voice {path}"       # transcript + a trailing command with the audio path
 press_enter = true                               # press Enter after inserting (submit)
 
 [[profiles]]

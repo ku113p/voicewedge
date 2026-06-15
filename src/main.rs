@@ -316,12 +316,17 @@ fn main() {
                                     .file_name()
                                     .map(|f| f.to_string_lossy().to_string())
                                     .unwrap_or_default();
+                                let abspath =
+                                    std::path::absolute(&path).unwrap_or_else(|_| path.clone());
                                 let tmpl = if profile.template.is_empty() {
                                     "{text}".to_string()
                                 } else {
                                     profile.template.clone()
                                 };
-                                let line = tmpl.replace("{text}", &text).replace("{filename}", &filename);
+                                let line = tmpl
+                                    .replace("{text}", &text)
+                                    .replace("{path}", &abspath.to_string_lossy())
+                                    .replace("{filename}", &filename);
                                 match inject::inject(&line, profile.press_enter, &method, restore) {
                                     Ok(()) => notify::toast("voicewedge", "Transcribed & inserted"),
                                     Err(e) => {
