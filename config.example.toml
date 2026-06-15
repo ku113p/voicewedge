@@ -1,44 +1,63 @@
-# Copy to config.toml (gitignored) and fill in your key.
-# config.toml is read from %APPDATA%\voicewedge\config.toml on Windows.
+# voicewedge configuration.
+# Copy this file to `config.toml` (same folder) and put your OpenRouter API key in it.
+# config.toml is searched: ./config.toml (the app's working dir), then
+# %APPDATA%\voicewedge\config.toml. It is gitignored — your key stays out of the repo.
+# Edit, then restart the app (tray -> Quit, relaunch) to apply.
 
-hotkey = "Super+Alt+Space"         # ONE hotkey to START recording (Super = Windows key; change if it clashes)
-mode   = "enter_to_stop"            # STOP on Enter, CANCEL on Escape (both swallowed)
+# Global hotkey to START recording. Then Enter finishes, Escape cancels.
+# Modifiers: Super (Windows key), Ctrl, Alt, Shift. Run `cargo run --example
+# probe_hotkeys` to see which combos are free on your machine.
+hotkey = "Super+Alt+Space"
 
-# Profiles = the "two modes". One hotkey records; the ACTIVE profile decides the
-# inject template. Switch active_profile here or from the tray menu — no second hotkey.
+# Stop mode. Currently only "enter_to_stop" (Enter = finish, Escape = cancel).
+mode = "enter_to_stop"
+
+# Which profile is active. You can also switch this in the tray menu.
 active_profile = "biograph"
 
+# --- Profiles -----------------------------------------------------------------
+# One hotkey records; the ACTIVE profile's `template` builds the inserted text.
+# Placeholders: {text} = transcript, {filename} = saved audio file name.
 [[profiles]]
 name        = "biograph"
-# Inject template: {text} = transcript, {filename} = the WAV file name. Position them freely.
-template    = "{text}  /bio:voice {filename}"
-press_enter = true
+template    = "{text}  /bio:voice {filename}"   # transcript + a trailing command
+press_enter = true                               # press Enter after inserting (submit)
 
 [[profiles]]
 name        = "plain"
-template    = "{text}"   # plain dictation: just the text
+template    = "{text}"                            # just the transcript, no submit
 press_enter = false
 
+# --- Speech-to-text (OpenRouter) ----------------------------------------------
 [stt]
 provider     = "openrouter"
-model        = "openai/gpt-4o-transcribe"  # best Russian in our A/B; alt: openai/whisper-large-v3, qwen/qwen3-asr-flash-2026-02-10
-language     = "layout"                      # "layout" = follow active kbd layout | "auto" = model detects | "ru"/"en" = fixed
-api_key_env  = "OPENROUTER_API_KEY"         # read key from this env var...
-api_key      = ""                            # ...or paste here (this file is your gitignored config.toml)
+# Default won our Russian A/B. Alternatives: openai/whisper-large-v3,
+# qwen/qwen3-asr-flash-2026-02-10, google/chirp-3.
+model        = "openai/gpt-4o-transcribe"
+# "layout" = follow active keyboard layout (RU->ru, EN->en) | "auto" = model
+# detects | a fixed code like "ru" / "en".
+language     = "layout"
+api_key      = ""                            # paste your OpenRouter key here
+api_key_env  = "OPENROUTER_API_KEY"          # ...or leave api_key empty and set this env var
 endpoint     = "https://openrouter.ai/api/v1/audio/transcriptions"
 timeout_secs = 60
 
+# --- Text injection -----------------------------------------------------------
 [inject]
-method            = "paste"   # "paste" (recommended) | "type"
+# "type"  = simulate typing (Unicode; reliable for any language, incl. Cyrillic)
+# "paste" = set clipboard + Ctrl+V (instant for long text; restores clipboard)
+method            = "type"
 restore_clipboard = true
 
+# --- Audio --------------------------------------------------------------------
 [audio]
-inbox_dir   = 'CHANGE_ME\biograph\files\audio_inbox'
-sample_rate = 16000
+inbox_dir   = "recordings"   # where WAVs are saved (relative to the working dir, or an absolute path)
+sample_rate = 16000          # informational; capture uses the input device's rate
 format      = "wav"
-max_seconds = 180   # auto-stop after this many seconds
+max_seconds = 180            # auto-stop after this many seconds (safety limit)
 
+# --- Feedback -----------------------------------------------------------------
 [feedback]
-overlay = true   # on-screen "recording…" indicator (Win+H style)
-toast   = true
-sound   = true
+overlay = true   # (reserved) on-screen recording indicator
+toast   = true   # Windows toast notifications (start / done / cancel / error)
+sound   = true   # audio cues: rising = start, ding = finish, low tu-du = problem
