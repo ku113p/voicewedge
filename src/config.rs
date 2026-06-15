@@ -102,7 +102,7 @@ impl Default for Stt {
 
 impl Default for Inject {
     fn default() -> Self {
-        Self { method: "paste".into(), restore_clipboard: true }
+        Self { method: "type".into(), restore_clipboard: true }
     }
 }
 
