@@ -1,8 +1,5 @@
-//! Inject text into the focused window. Two methods (config `inject.method`):
-//!   - "type"  (default): enigo.text() — Unicode injection, layout-independent,
-//!                        reliable for Cyrillic, no clipboard clobber.
-//!   - "paste":           clipboard + Ctrl+V (real VK_V on Windows), then restore.
-//! Cross-platform via arboard + enigo.
+//! Inject text into the focused window. "type" (default) uses enigo Unicode
+//! (layout-independent, reliable for Cyrillic); "paste" uses clipboard + Ctrl+V.
 
 use std::thread::sleep;
 use std::time::Duration;

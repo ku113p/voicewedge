@@ -1,5 +1,4 @@
-//! Configuration: a TOML file (cross-platform location) holding the OpenRouter key,
-//! model, hotkey, profiles, etc. The key lives ONLY here (gitignored) or in an env var.
+//! Config loaded from a TOML file (or defaults).
 
 use std::path::PathBuf;
 
@@ -62,6 +61,8 @@ pub struct Feedback {
     pub overlay: bool,
     pub toast: bool,
     pub sound: bool,
+    /// Before recording, check a text field is focused; if not, alert and skip.
+    pub require_focus: bool,
 }
 
 impl Default for Config {
@@ -122,7 +123,7 @@ impl Default for Audio {
 
 impl Default for Feedback {
     fn default() -> Self {
-        Self { overlay: true, toast: true, sound: true }
+        Self { overlay: true, toast: true, sound: true, require_focus: true }
     }
 }
 

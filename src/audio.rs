@@ -1,6 +1,4 @@
-//! Microphone capture via cpal (cross-platform: WASAPI / ALSA / CoreAudio).
-//! Records to an in-memory f32 buffer; on stop, downmixes to mono and the caller
-//! writes a 16-bit WAV. No resampling yet — the STT API resamples server-side.
+//! Microphone capture via cpal. No resampling — the STT API resamples server-side.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -67,7 +65,7 @@ impl Recorder {
 
     /// Stop capture, downmix to mono, return (samples, sample_rate).
     pub fn stop(self) -> (Vec<f32>, u32) {
-        drop(self.stream); // stops the input stream
+        drop(self.stream);
         let raw = self.buf.lock().unwrap().clone();
         let mono = if self.channels > 1 {
             raw.chunks(self.channels as usize)

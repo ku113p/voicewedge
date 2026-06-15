@@ -1,11 +1,10 @@
 //! Global keyboard hook for the stop/cancel keys, via `rdev::grab`.
 //!
-//! While `recording` is true, Enter -> Finish and Escape -> Cancel, and those
-//! keys are SWALLOWED (return None) so they never reach the focused window —
-//! otherwise the stop-Enter would submit an empty line in the chat box before
-//! the transcript exists. Every other key passes through untouched.
+//! While recording, Enter -> Finish and Escape -> Cancel are SWALLOWED so they
+//! never reach the focused window — otherwise stop-Enter would submit an empty
+//! line in the chat box before the transcript exists.
 //!
-//! `rdev::grab` runs its own message loop and blocks, so it lives on its own thread.
+//! `rdev::grab` runs its own blocking message loop, so it lives on its own thread.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;

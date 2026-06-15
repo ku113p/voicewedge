@@ -24,14 +24,10 @@ fn main() {
         ("Win+Alt+D", m_winalt, Code::KeyD),
         ("Win+Alt+Q", m_winalt, Code::KeyQ),
         ("Win+Alt+Backquote", m_winalt, Code::Backquote),
-        // Win+Shift cluster
         ("Win+Shift+Space", m_winshift, Code::Space),
         ("Win+Shift+Z", m_winshift, Code::KeyZ),
-        // Win+Ctrl cluster
         ("Win+Ctrl+Space", m_winctrl, Code::Space),
-        // Current / reference
         ("Ctrl+Shift+Space", m_ctrlshift, Code::Space),
-        // Single keys
         ("Pause", Modifiers::empty(), Code::Pause),
         ("ScrollLock", Modifiers::empty(), Code::ScrollLock),
         ("F13", Modifiers::empty(), Code::F13),

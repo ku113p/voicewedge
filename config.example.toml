@@ -58,6 +58,7 @@ max_seconds = 180            # auto-stop after this many seconds (safety limit)
 
 # --- Feedback -----------------------------------------------------------------
 [feedback]
-overlay = true   # (reserved) on-screen recording indicator
-toast   = true   # Windows toast notifications (start / done / cancel / error)
-sound   = true   # audio cues: rising = start, ding = finish, low tu-du = problem
+overlay       = true   # (reserved) on-screen recording indicator
+toast         = true   # Windows toast notifications (start / done / cancel / error)
+sound         = true   # audio cues: rising = start, ding = finish, low tu-du = problem
+require_focus = true   # before recording, require a focused text field; else alert + skip

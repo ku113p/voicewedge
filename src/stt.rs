@@ -1,9 +1,4 @@
-//! Speech-to-text via OpenRouter's /audio/transcriptions endpoint.
-//!
-//! OpenRouter expects JSON with **base64-encoded audio** (not multipart like OpenAI):
-//!   { "model": ..., "input_audio": { "data": "<base64>", "format": "wav" }, "language": ... }
-//!
-//! Blocking HTTP — runs on a worker thread so the UI loop never blocks.
+//! Speech-to-text via OpenRouter. Expects JSON with base64 audio (not multipart like OpenAI).
 
 use std::path::Path;
 use std::time::Duration;

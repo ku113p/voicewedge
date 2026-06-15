@@ -1,5 +1,4 @@
-//! Toast notifications (cross-platform via notify-rust; WinRT toast on Windows).
-//! Fired on a worker thread so the UI loop never blocks.
+//! Toast notifications via notify-rust, fired on a worker thread.
 
 pub fn toast(summary: &str, body: &str) {
     let summary = summary.to_string();

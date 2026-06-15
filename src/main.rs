@@ -1,14 +1,10 @@
-//! voicewedge — Phase 2 (+feedback, settings menu, inject template, mic icon, sounds, language modes).
-//!
-//! Tray app: hotkey starts recording; Enter finishes (transcribe + inject), Escape
-//! cancels. Stop keys are swallowed by a global keyboard hook. The injected line is
-//! built from the active profile's `template`. Language follows config (fixed / "auto"
-//! / "layout" = active keyboard layout). Audio cues + a mic tray icon give feedback.
+//! voicewedge — tray app: hotkey records, Enter transcribes + injects, Escape cancels.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
 mod config;
+mod focus;
 mod hook;
 mod inject;
 mod notify;
@@ -34,12 +30,11 @@ use tray_icon::{
 };
 use tracing::{error, info, warn};
 
-/// A simple anti-aliased microphone icon drawn in code (64x64 RGBA). `dot` adds a
-/// state indicator in the bottom-right (e.g. red = recording, orange = transcribing).
+/// Microphone icon drawn in code; `dot` adds a bottom-right state indicator.
 fn make_mic_icon(dot: Option<[u8; 3]>) -> Icon {
     let size: u32 = 64;
     let s = size as f32;
-    let mic = [0x4d, 0x9b, 0xff]; // light blue
+    let mic = [0x4d, 0x9b, 0xff];
 
     let seg = |px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32| -> f32 {
         let (abx, aby) = (bx - ax, by - ay);
@@ -154,6 +149,7 @@ fn main() {
     }
     let active = cfg.active_profile();
     let sound_on = cfg.feedback.sound;
+    let require_focus = cfg.feedback.require_focus;
 
     let inbox_dir = PathBuf::from(&cfg.audio.inbox_dir);
     if let Err(e) = std::fs::create_dir_all(&inbox_dir) {
@@ -163,7 +159,6 @@ fn main() {
 
     let event_loop = EventLoop::new();
 
-    // --- Global hotkey: Ctrl+Shift+Space (start only) ---
     let hotkey_manager = GlobalHotKeyManager::new().expect("create hotkey manager");
     let hotkey = HotKey::from_str(&cfg.hotkey).unwrap_or_else(|_| {
         warn!("could not parse hotkey '{}'; using Win+Alt+Space", cfg.hotkey);
@@ -175,17 +170,14 @@ fn main() {
     }
     info!("hotkey '{}' ready — press to record, Enter to finish, Esc to cancel", cfg.hotkey);
 
-    // --- Keyboard hook for Enter (finish) / Escape (cancel) ---
     let recording_flag = Arc::new(AtomicBool::new(false));
     let (stop_tx, stop_rx) = mpsc::channel::<hook::StopKind>();
     let stop_tx_timeout = stop_tx.clone();
     hook::spawn(recording_flag.clone(), stop_tx);
     let max_secs = cfg.audio.max_seconds;
 
-    // --- Worker -> UI "transcription finished" signal (resets the tray icon) ---
     let (done_tx, done_rx) = mpsc::channel::<()>();
 
-    // --- Tray icon + menu ---
     let menu = Menu::new();
     let settings_item = MenuItem::new("Settings (edit config)", true, None);
     let recordings_item = MenuItem::new("Open recordings folder", true, None);
@@ -199,8 +191,8 @@ fn main() {
     let quit_id = quit_item.id().clone();
 
     let icon_idle = make_mic_icon(None);
-    let icon_rec = make_mic_icon(Some([0xff, 0x3b, 0x30])); // red dot
-    let icon_busy = make_mic_icon(Some([0xff, 0xa5, 0x00])); // orange dot
+    let icon_rec = make_mic_icon(Some([0xff, 0x3b, 0x30]));
+    let icon_busy = make_mic_icon(Some([0xff, 0xa5, 0x00]));
 
     let tray = TrayIconBuilder::new()
         .with_tooltip("voicewedge — ready")
@@ -229,13 +221,23 @@ fn main() {
             }
         }
 
-        // Start on hotkey.
         while let Ok(ev) = hotkey_rx.try_recv() {
             if ev.id != hotkey_id || ev.state != HotKeyState::Pressed {
                 continue;
             }
             if recorder.is_some() {
                 continue;
+            }
+            if require_focus {
+                let (ok, ct) = focus::focused_accepts_text();
+                if !ok {
+                    info!("no text field focused (control type {ct}) — not recording");
+                    notify::toast("voicewedge", "No text field focused — click into a text box first");
+                    if sound_on {
+                        sound::alert();
+                    }
+                    continue;
+                }
             }
             match audio::Recorder::start() {
                 Ok(rec) => {
@@ -260,7 +262,6 @@ fn main() {
             }
         }
 
-        // Finish / cancel from the keyboard hook.
         while let Ok(kind) = stop_rx.try_recv() {
             recording_flag.store(false, Ordering::SeqCst);
             record_start = None;
@@ -346,13 +347,11 @@ fn main() {
             }
         }
 
-        // Transcription finished -> reset the tray icon to idle.
         while done_rx.try_recv().is_ok() {
             let _ = tray.set_icon(Some(icon_idle.clone()));
             let _ = tray.set_tooltip(Some("voicewedge — ready"));
         }
 
-        // Menu actions.
         while let Ok(ev) = menu_rx.try_recv() {
             if ev.id == quit_id {
                 info!("quit selected — exiting");

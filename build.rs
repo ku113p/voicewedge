@@ -1,6 +1,5 @@
 fn main() {
-    // Embed the app icon into the Windows .exe (shows on the taskbar / shortcut).
-    // Tolerant: if the .ico hasn't been generated yet, just skip.
+    // Embed the app icon into the Windows .exe. Skip if the .ico isn't generated yet.
     #[cfg(windows)]
     {
         if std::path::Path::new("assets/voicewedge.ico").exists() {
