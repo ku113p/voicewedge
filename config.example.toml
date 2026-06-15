@@ -20,7 +20,7 @@ active_profile = "biograph"
 # Placeholders: {text} = transcript, {path} = absolute WAV path, {filename} = file name.
 [[profiles]]
 name        = "biograph"
-template    = "{text}  /bio:voice {path}"       # transcript + a trailing command with the audio path
+template    = "{text}\n{{voice: {path}}}"       # transcript, newline, then a {{voice: <path>}} marker (NOT a slash command)
 press_enter = true                               # press Enter after inserting (submit)
 
 [[profiles]]

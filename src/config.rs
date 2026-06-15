@@ -73,7 +73,7 @@ impl Default for Config {
             profiles: vec![
                 Profile {
                     name: "biograph".into(),
-                    template: "{text}  /bio:voice {path}".into(),
+                    template: "{text}\n{{voice: {path}}}".into(),
                     press_enter: true,
                 },
                 Profile { name: "plain".into(), template: "{text}".into(), press_enter: false },
