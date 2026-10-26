@@ -27,6 +27,7 @@ pub fn transcribe(
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
+        .http1_only()
         .build()?;
 
     let resp = client
